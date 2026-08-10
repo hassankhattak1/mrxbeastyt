@@ -65,32 +65,42 @@ export function validateFormatId(formatId: string): boolean {
 export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
   const isWin = process.platform === "win32";
 
-  // Read binary path from process.env.YTDLP_PATH or default to ./bin/yt-dlp
-  let binPath = process.env.YTDLP_PATH;
+  // Log raw environment variable with explicit delimiters
+  const rawEnvPath = process.env.YTDLP_PATH;
+  console.log(`[RAW_YTDLP_PATH:${rawEnvPath}:END]`);
 
-  if (!binPath) {
-    binPath = path.join(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
+  let binPath: string;
+
+  if (rawEnvPath && rawEnvPath.trim().length > 0) {
+    // Strip leading/trailing quotes or whitespace and normalize using Node's path.resolve
+    const cleanedPath = rawEnvPath.trim().replace(/^["']|["']$/g, "");
+    binPath = path.resolve(cleanedPath);
+  } else {
+    binPath = path.resolve(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
   }
 
-  // Check file existence
+  // Print exact resolved path being checked by fs calls
+  console.log(`[RESOLVED_YTDLP_PATH:${binPath}:END]`);
+
+  // Verify file existence
   if (!fs.existsSync(/*turbopackIgnore: true*/ binPath)) {
     throw new Error(`[yt-dlp] FATAL: YTDLP_PATH binary missing or undefined at: ${binPath}`);
   }
 
-  // Enforce executable permissions on non-Windows OS
+  // Permissions check based on OS
   if (!isWin) {
     try {
       fs.chmodSync(binPath, 0o755);
-    } catch {
-      // Ignore chmod warning
+      fs.accessSync(binPath, fs.constants.X_OK);
+    } catch (accessErr) {
+      console.warn(`[yt-dlp] Warning checking Unix executable permissions at ${binPath}:`, (accessErr as Error).message);
     }
-  }
-
-  // Verify executable access
-  try {
-    fs.accessSync(binPath, fs.constants.X_OK);
-  } catch (accessErr) {
-    throw new Error(`[yt-dlp] FATAL: Binary at ${binPath} is not executable: ${(accessErr as Error).message}`);
+  } else {
+    try {
+      fs.accessSync(binPath, fs.constants.F_OK);
+    } catch (accessErr) {
+      console.warn(`[yt-dlp] Warning checking Windows file access permissions at ${binPath}:`, (accessErr as Error).message);
+    }
   }
 
   return { command: binPath, argsPrefix: [] };
@@ -99,17 +109,28 @@ export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
 export function getFfmpegPath(): string {
   const isWin = process.platform === "win32";
 
-  // Read ffmpeg path from process.env.FFMPEG_PATH or default to local/system ffmpeg
-  let ffmpegPath = process.env.FFMPEG_PATH;
+  const rawFfmpegPath = process.env.FFMPEG_PATH;
+  console.log(`[RAW_FFMPEG_PATH:${rawFfmpegPath}:END]`);
 
-  if (!ffmpegPath) {
-    const localFfmpeg = path.join(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
+  let ffmpegPath: string;
+
+  if (rawFfmpegPath && rawFfmpegPath.trim().length > 0) {
+    const cleanedPath = rawFfmpegPath.trim().replace(/^["']|["']$/g, "");
+    if (cleanedPath === "ffmpeg") {
+      ffmpegPath = "ffmpeg";
+    } else {
+      ffmpegPath = path.resolve(cleanedPath);
+    }
+  } else {
+    const localFfmpeg = path.resolve(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
     if (fs.existsSync(/*turbopackIgnore: true*/ localFfmpeg)) {
       ffmpegPath = localFfmpeg;
     } else {
       ffmpegPath = "ffmpeg";
     }
   }
+
+  console.log(`[RESOLVED_FFMPEG_PATH:${ffmpegPath}:END]`);
 
   if (ffmpegPath !== "ffmpeg") {
     if (!fs.existsSync(/*turbopackIgnore: true*/ ffmpegPath)) {
@@ -136,6 +157,7 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
 
   try {
     const { command } = getYtDlpCommand();
+    console.log(`[HEALTH_CHECK_SPAWNING:${command}:END]`);
 
     return new Promise((resolve) => {
       const child = spawn(/*turbopackIgnore: true*/ command, ["--version"], { shell: false });
@@ -162,7 +184,7 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
       });
     });
   } catch (err) {
-    console.error((err as Error).message);
+    console.error(`[yt-dlp health check] Exception: ${(err as Error).message}`);
     return false;
   }
 }
