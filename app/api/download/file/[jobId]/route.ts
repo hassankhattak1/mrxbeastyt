@@ -12,6 +12,34 @@ export async function GET(
     return NextResponse.json({ error: "Missing jobId parameter" }, { status: 400 });
   }
 
+  const downloaderUrl = process.env.DOWNLOADER_API_URL;
+
+  // If DOWNLOADER_API_URL is configured (Vercel production), proxy finished file stream from VPS!
+  if (downloaderUrl && downloaderUrl.trim().length > 0) {
+    const vpsBase = downloaderUrl.trim().replace(/\/$/, "");
+    const vpsRes = await fetch(`${vpsBase}/api/download/file/${jobId}`);
+
+    if (!vpsRes.ok || !vpsRes.body) {
+      return NextResponse.json({ error: "File not ready or expired on VPS" }, { status: vpsRes.status });
+    }
+
+    const contentType = vpsRes.headers.get("content-type") || "video/mp4";
+    const contentDisposition =
+      vpsRes.headers.get("content-disposition") || `attachment; filename="MRXBEASTYT_media.mp4"`;
+
+    return new NextResponse(vpsRes.body as ReadableStream, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": contentDisposition,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      },
+    });
+  }
+
+  // Local fallback
   const job = getJob(jobId);
   if (!job || job.status !== "done" || !job.filePath || !fs.existsSync(job.filePath)) {
     return NextResponse.json({ error: "File not ready or job expired" }, { status: 404 });

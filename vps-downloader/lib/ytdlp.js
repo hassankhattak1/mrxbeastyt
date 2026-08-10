@@ -1,6 +1,4 @@
-import { spawn } from "child_process";
-import path from "path";
-import fs from "fs";
+const { spawn } = require("child_process");
 
 const ALLOWED_DOMAINS = [
   "youtube.com",
@@ -31,7 +29,7 @@ const ALLOWED_DOMAINS = [
   "www.twitch.tv",
 ];
 
-export function validateAndSanitizeUrl(urlString: string): { valid: boolean; error?: string; url?: string } {
+function validateAndSanitizeUrl(urlString) {
   try {
     const parsed = new URL(urlString.trim());
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -56,64 +54,28 @@ export function validateAndSanitizeUrl(urlString: string): { valid: boolean; err
   }
 }
 
-export function validateFormatId(formatId: string): boolean {
+function validateFormatId(formatId) {
   if (!formatId || typeof formatId !== "string") return false;
   return /^[a-zA-Z0-9_\-\+\[\]<=/]+$/.test(formatId.trim());
 }
 
-export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
+function getYtDlpCommand() {
   const isWin = process.platform === "win32";
-  const pythonExec = isWin ? "python" : "python3";
+  const pythonExec = process.env.PYTHON_EXEC || (isWin ? "python" : "python3");
   return { command: pythonExec, argsPrefix: ["-m", "yt_dlp"] };
 }
 
-export function getFfmpegPath(): string {
+function getFfmpegPath() {
   return process.env.FFMPEG_PATH || "ffmpeg";
 }
 
-export interface NormalizedFormat {
-  formatId: string;
-  quality: string;
-  format: string;
-  size: string;
-  type: "video" | "audio";
-  resolution?: string;
-}
-
-export interface YtDlpVideoInfo {
-  title: string;
-  thumbnail: string;
-  duration: string;
-  platform: string;
-  webpageUrl: string;
-  formats: NormalizedFormat[];
-}
-
-export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoInfo> {
-  const downloaderUrl = process.env.DOWNLOADER_API_URL;
-
-  // If DOWNLOADER_API_URL is configured (Vercel production), proxy request to VPS service!
-  if (downloaderUrl && downloaderUrl.trim().length > 0) {
-    const vpsBase = downloaderUrl.trim().replace(/\/$/, "");
-    const res = await fetch(`${vpsBase}/api/fetch-media`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-
-    const data = await res.json();
-    if (!res.ok || !data.success || !data.data) {
-      throw new Error(data.error || "VPS downloader service failed to extract media.");
-    }
-    return data.data;
-  }
-
-  // Fallback for local development environment
+function fetchVideoInfoWithYtDlp(url) {
   const { command, argsPrefix } = getYtDlpCommand();
   const args = [...argsPrefix, "-j", "--no-playlist", url];
 
   return new Promise((resolve, reject) => {
-    const child = spawn(/*turbopackIgnore: true*/ command, args, { shell: false });
+    // Never construct shell strings — use array-form spawn arguments only
+    const child = spawn(command, args, { shell: false });
 
     let stdout = "";
     let stderr = "";
@@ -127,7 +89,7 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
     });
 
     child.on("error", (err) => {
-      reject(new Error(`Failed to spawn yt-dlp Python module: ${err.message}`));
+      reject(new Error(`Failed to spawn yt-dlp on VPS: ${err.message}`));
     });
 
     child.on("close", (code) => {
@@ -152,7 +114,7 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
 
         const platform = rawJson.extractor_key || rawJson.extractor || "Media Platform";
 
-        const normalizedFormats: NormalizedFormat[] = [
+        const normalizedFormats = [
           {
             formatId: "bestvideo[height<=1080]",
             quality: "1080p Full HD (merged audio)",
@@ -189,16 +151,14 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
 
         if (Array.isArray(rawJson.formats)) {
           const rawFormats = rawJson.formats;
-
           const filteredVideo = rawFormats.filter(
-            (f: { vcodec?: string; height?: number }) =>
-              f.vcodec && f.vcodec !== "none" && f.height && f.height >= 360
+            (f) => f.vcodec && f.vcodec !== "none" && f.height && f.height >= 360
           );
 
           filteredVideo
             .slice(-2)
             .reverse()
-            .forEach((f: { format_id: string; height?: number; ext?: string; filesize?: number }) => {
+            .forEach((f) => {
               const sizeMb = f.filesize ? `${(f.filesize / (1024 * 1024)).toFixed(1)} MB` : "Merged Stream";
               const ext = (f.ext || "mp4").toUpperCase();
               normalizedFormats.push({
@@ -221,8 +181,16 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
           formats: normalizedFormats,
         });
       } catch (parseError) {
-        reject(new Error(`Failed to parse media metadata: ${(parseError as Error).message}`));
+        reject(new Error(`Failed to parse media metadata: ${parseError.message}`));
       }
     });
   });
 }
+
+module.exports = {
+  validateAndSanitizeUrl,
+  validateFormatId,
+  getYtDlpCommand,
+  getFfmpegPath,
+  fetchVideoInfoWithYtDlp,
+};

@@ -11,6 +11,31 @@ export async function GET(
     return NextResponse.json({ error: "Missing jobId parameter" }, { status: 400 });
   }
 
+  const downloaderUrl = process.env.DOWNLOADER_API_URL;
+
+  // If DOWNLOADER_API_URL is configured (Vercel production), proxy SSE progress stream from VPS!
+  if (downloaderUrl && downloaderUrl.trim().length > 0) {
+    const vpsBase = downloaderUrl.trim().replace(/\/$/, "");
+    const vpsRes = await fetch(`${vpsBase}/api/download/progress/${jobId}`, {
+      headers: { Accept: "text/event-stream" },
+    });
+
+    if (!vpsRes.ok || !vpsRes.body) {
+      return NextResponse.json({ error: "Failed to connect to VPS SSE stream" }, { status: vpsRes.status });
+    }
+
+    return new NextResponse(vpsRes.body as ReadableStream, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
+
+  // Local fallback
   const initialJob = getJob(jobId);
   if (!initialJob) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
@@ -20,7 +45,6 @@ export async function GET(
 
   const stream = new ReadableStream({
     start(controller) {
-      // Send current state immediately
       const sendState = () => {
         const job = getJob(jobId);
         if (!job) {
@@ -49,7 +73,6 @@ export async function GET(
       const finished = sendState();
       if (finished) return;
 
-      // Poll job state every 350ms
       const interval = setInterval(() => {
         const isClosed = sendState();
         if (isClosed) {
