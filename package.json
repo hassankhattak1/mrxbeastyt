@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node scripts/ensure-binaries.js",
-    "setup": "node scripts/ensure-binaries.js"
+    "postinstall": "node scripts/setup-ytdlp.js",
+    "setup": "node scripts/setup-ytdlp.js"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

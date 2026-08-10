@@ -64,103 +64,107 @@ export function validateFormatId(formatId: string): boolean {
 
 export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
   const isWin = process.platform === "win32";
-  const localBinary = path.join(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
 
-  if (fs.existsSync(localBinary)) {
-    if (!isWin) {
-      try {
-        fs.chmodSync(localBinary, 0o755);
-      } catch (chmodErr) {
-        console.warn("[yt-dlp] Warning setting executable permissions:", (chmodErr as Error).message);
-      }
-    }
-    return { command: localBinary, argsPrefix: [] };
+  // Read binary path from process.env.YTDLP_PATH or default to ./bin/yt-dlp
+  let binPath = process.env.YTDLP_PATH;
+
+  if (!binPath) {
+    binPath = path.join(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
   }
 
-  // Fallback to absolute bin path even if missing so spawn surfaces ENOENT on exact path
-  return { command: localBinary, argsPrefix: [] };
+  // Check file existence
+  if (!fs.existsSync(/*turbopackIgnore: true*/ binPath)) {
+    throw new Error(`[yt-dlp] FATAL: YTDLP_PATH binary missing or undefined at: ${binPath}`);
+  }
+
+  // Enforce executable permissions on non-Windows OS
+  if (!isWin) {
+    try {
+      fs.chmodSync(binPath, 0o755);
+    } catch {
+      // Ignore chmod warning
+    }
+  }
+
+  // Verify executable access
+  try {
+    fs.accessSync(binPath, fs.constants.X_OK);
+  } catch (accessErr) {
+    throw new Error(`[yt-dlp] FATAL: Binary at ${binPath} is not executable: ${(accessErr as Error).message}`);
+  }
+
+  return { command: binPath, argsPrefix: [] };
 }
 
-export function getFfmpegPath(): string | null {
+export function getFfmpegPath(): string {
   const isWin = process.platform === "win32";
-  const localFfmpeg = path.join(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
 
-  if (fs.existsSync(localFfmpeg)) {
+  // Read ffmpeg path from process.env.FFMPEG_PATH or default to local/system ffmpeg
+  let ffmpegPath = process.env.FFMPEG_PATH;
+
+  if (!ffmpegPath) {
+    const localFfmpeg = path.join(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
+    if (fs.existsSync(/*turbopackIgnore: true*/ localFfmpeg)) {
+      ffmpegPath = localFfmpeg;
+    } else {
+      ffmpegPath = "ffmpeg";
+    }
+  }
+
+  if (ffmpegPath !== "ffmpeg") {
+    if (!fs.existsSync(/*turbopackIgnore: true*/ ffmpegPath)) {
+      console.warn(`[ffmpeg] Warning: FFMPEG_PATH target file does not exist at ${ffmpegPath}, falling back to system PATH 'ffmpeg'`);
+      return "ffmpeg";
+    }
     if (!isWin) {
       try {
-        fs.chmodSync(localFfmpeg, 0o755);
+        fs.chmodSync(ffmpegPath, 0o755);
       } catch {
         // Ignore chmod error
       }
     }
-    return localFfmpeg;
   }
 
-  const nodeModulesFfmpeg = path.join(
-    process.cwd(),
-    "node_modules",
-    "@ffmpeg-installer",
-    isWin
-      ? "win32-x64"
-      : process.platform === "darwin"
-      ? process.arch === "arm64"
-        ? "darwin-arm64"
-        : "darwin-x64"
-      : "linux-x64",
-    isWin ? "ffmpeg.exe" : "ffmpeg"
-  );
-
-  if (fs.existsSync(nodeModulesFfmpeg)) {
-    if (!isWin) {
-      try {
-        fs.chmodSync(nodeModulesFfmpeg, 0o755);
-      } catch {
-        // Ignore chmod error
-      }
-    }
-    return nodeModulesFfmpeg;
-  }
-
-  return null;
+  return ffmpegPath;
 }
 
-// Health check performed on boot/initialization to ensure binary is executable
+// Boot/startup health check
 let healthCheckPassed = false;
 
 export async function performBinaryHealthCheck(): Promise<boolean> {
   if (healthCheckPassed) return true;
 
-  const { command } = getYtDlpCommand();
+  try {
+    const { command } = getYtDlpCommand();
 
-  return new Promise((resolve) => {
-    if (!fs.existsSync(/*turbopackIgnore: true*/ command)) {
-      console.error(`[yt-dlp health check] FATAL: Standalone binary missing at ${command}`);
-      return resolve(false);
-    }
+    return new Promise((resolve) => {
+      const child = spawn(/*turbopackIgnore: true*/ command, ["--version"], { shell: false });
 
-    const child = spawn(/*turbopackIgnore: true*/ command, ["--version"], { shell: false });
+      let stdout = "";
+      child.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
 
-    let stdout = "";
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.on("error", (err) => {
-      console.error(`[yt-dlp health check] FATAL: Failed to execute binary at ${command}: ${err.message}`);
-      resolve(false);
-    });
-
-    child.on("close", (code) => {
-      if (code === 0) {
-        healthCheckPassed = true;
-        console.log(`[yt-dlp health check] Ready: Standalone binary v${stdout.trim()} at ${command}`);
-        resolve(true);
-      } else {
-        console.error(`[yt-dlp health check] FATAL: Binary at ${command} exited with code ${code}`);
+      child.on("error", (err) => {
+        console.error(`[yt-dlp health check] FATAL: Failed to execute binary at ${command}: ${err.message}`);
         resolve(false);
-      }
+      });
+
+      child.on("close", (code) => {
+        if (code === 0) {
+          healthCheckPassed = true;
+          console.log(`[yt-dlp health check] Ready: Standalone binary v${stdout.trim()} at ${command}`);
+          resolve(true);
+        } else {
+          console.error(`[yt-dlp health check] FATAL: Binary at ${command} exited with code ${code}`);
+          resolve(false);
+        }
+      });
     });
-  });
+  } catch (err) {
+    console.error((err as Error).message);
+    return false;
+  }
 }
 
 // Execute health check on module import
@@ -187,7 +191,7 @@ export interface YtDlpVideoInfo {
 export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoInfo> {
   const isHealthy = await performBinaryHealthCheck();
   if (!isHealthy) {
-    throw new Error("Server yt-dlp binary health check failed. Standalone binary is missing or non-executable.");
+    throw new Error("Server yt-dlp binary health check failed. YTDLP_PATH binary is missing or non-executable.");
   }
 
   const { command, argsPrefix } = getYtDlpCommand();
