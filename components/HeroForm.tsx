@@ -48,6 +48,8 @@ export default function HeroForm() {
     };
   }, []);
 
+  const getBackendUrl = () => process.env.NEXT_PUBLIC_BACKEND_URL || "";
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!urlInput.trim()) {
@@ -62,7 +64,7 @@ export default function HeroForm() {
     resetJobState();
 
     try {
-      const res = await fetch("/api/fetch-media", {
+      const res = await fetch(`${getBackendUrl()}/api/fetch-media`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -104,7 +106,7 @@ export default function HeroForm() {
     setJobStatus("queued");
 
     try {
-      const res = await fetch("/api/download/start", {
+      const res = await fetch(`${getBackendUrl()}/api/download/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -128,7 +130,7 @@ export default function HeroForm() {
       setJobId(activeJobId);
 
       // Open Server-Sent Events stream for live progress updates
-      const es = new EventSource(`/api/download/progress/${activeJobId}`);
+      const es = new EventSource(`${getBackendUrl()}/api/download/progress/${activeJobId}`);
       eventSourceRef.current = es;
 
       es.onmessage = (event) => {
@@ -161,7 +163,7 @@ export default function HeroForm() {
 
   const triggerFileDownload = (id: string) => {
     const link = document.createElement("a");
-    link.href = `/api/download/file/${id}`;
+    link.href = `${getBackendUrl()}/api/download/file/${id}`;
     link.setAttribute("download", "");
     document.body.appendChild(link);
     link.click();
