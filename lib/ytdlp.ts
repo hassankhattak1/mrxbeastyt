@@ -2,7 +2,6 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 
-// Allowed domain whitelist to prevent SSRF / arbitrary command execution
 const ALLOWED_DOMAINS = [
   "youtube.com",
   "www.youtube.com",
@@ -64,111 +63,35 @@ export function validateFormatId(formatId: string): boolean {
 
 export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
   const isWin = process.platform === "win32";
-
-  // Read environment variable or fallback to Linux / Windows defaults
-  const rawEnvPath = process.env.YTDLP_PATH;
-  console.log(`[RAW_YTDLP_PATH:${rawEnvPath}:END]`);
-
-  let binPath: string;
-
-  if (rawEnvPath && rawEnvPath.trim().length > 0) {
-    const cleanedPath = rawEnvPath.trim().replace(/^["']|["']$/g, "");
-    binPath = path.resolve(cleanedPath);
-  } else if (!isWin) {
-    // Linux container (Railway / Docker / VPS)
-    if (fs.existsSync("/usr/local/bin/yt-dlp")) {
-      binPath = "/usr/local/bin/yt-dlp";
-    } else if (fs.existsSync(path.resolve(process.cwd(), "bin", "yt-dlp"))) {
-      binPath = path.resolve(process.cwd(), "bin", "yt-dlp");
-    } else {
-      binPath = "/usr/local/bin/yt-dlp";
-    }
-  } else {
-    // Windows local dev
-    binPath = path.resolve(process.cwd(), "bin", "yt-dlp.exe");
-  }
-
-  console.log(`[RESOLVED_YTDLP_PATH:${binPath}:END]`);
-
-  // Verify file existence
-  if (!fs.existsSync(/*turbopackIgnore: true*/ binPath)) {
-    throw new Error(`[yt-dlp] FATAL: YTDLP_PATH binary missing or undefined at: ${binPath}`);
-  }
-
-  // Permissions check based on OS
-  if (!isWin) {
-    try {
-      fs.chmodSync(binPath, 0o755);
-      fs.accessSync(binPath, fs.constants.X_OK);
-    } catch (accessErr) {
-      console.warn(`[yt-dlp] Warning checking Unix executable permissions at ${binPath}:`, (accessErr as Error).message);
-    }
-  } else {
-    try {
-      fs.accessSync(binPath, fs.constants.F_OK);
-    } catch (accessErr) {
-      console.warn(`[yt-dlp] Warning checking Windows file access permissions at ${binPath}:`, (accessErr as Error).message);
-    }
-  }
-
-  return { command: binPath, argsPrefix: [] };
+  const pythonExec = isWin ? "python" : "python3";
+  return { command: pythonExec, argsPrefix: ["-m", "yt_dlp"] };
 }
 
 export function getFfmpegPath(): string {
-  const isWin = process.platform === "win32";
-
   const rawFfmpegPath = process.env.FFMPEG_PATH;
-  console.log(`[RAW_FFMPEG_PATH:${rawFfmpegPath}:END]`);
-
-  let ffmpegPath: string;
 
   if (rawFfmpegPath && rawFfmpegPath.trim().length > 0) {
     const cleanedPath = rawFfmpegPath.trim().replace(/^["']|["']$/g, "");
     if (cleanedPath === "ffmpeg") {
-      ffmpegPath = "ffmpeg";
-    } else {
-      ffmpegPath = path.resolve(cleanedPath);
-    }
-  } else {
-    const localFfmpeg = path.resolve(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
-    if (fs.existsSync(/*turbopackIgnore: true*/ localFfmpeg)) {
-      ffmpegPath = localFfmpeg;
-    } else {
-      ffmpegPath = "ffmpeg";
-    }
-  }
-
-  console.log(`[RESOLVED_FFMPEG_PATH:${ffmpegPath}:END]`);
-
-  if (ffmpegPath !== "ffmpeg") {
-    if (!fs.existsSync(/*turbopackIgnore: true*/ ffmpegPath)) {
-      console.warn(`[ffmpeg] Warning: FFMPEG_PATH target file does not exist at ${ffmpegPath}, falling back to system PATH 'ffmpeg'`);
       return "ffmpeg";
     }
-    if (!isWin) {
-      try {
-        fs.chmodSync(ffmpegPath, 0o755);
-      } catch {
-        // Ignore chmod error
-      }
-    }
+    return path.resolve(cleanedPath);
   }
 
-  return ffmpegPath;
+  return "ffmpeg";
 }
 
-// Boot/startup health check
 let healthCheckPassed = false;
 
 export async function performBinaryHealthCheck(): Promise<boolean> {
   if (healthCheckPassed) return true;
 
   try {
-    const { command } = getYtDlpCommand();
-    console.log(`[HEALTH_CHECK_SPAWNING:${command}:END]`);
+    const { command, argsPrefix } = getYtDlpCommand();
+    const args = [...argsPrefix, "--version"];
 
     return new Promise((resolve) => {
-      const child = spawn(/*turbopackIgnore: true*/ command, ["--version"], { shell: false });
+      const child = spawn(/*turbopackIgnore: true*/ command, args, { shell: false });
 
       let stdout = "";
       child.stdout?.on("data", (data) => {
@@ -176,17 +99,17 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
       });
 
       child.on("error", (err) => {
-        console.error(`[yt-dlp health check] FATAL: Failed to execute binary at ${command}: ${err.message}`);
+        console.error(`[yt-dlp health check] FATAL: Failed to execute ${command} -m yt_dlp: ${err.message}`);
         resolve(false);
       });
 
       child.on("close", (code) => {
         if (code === 0) {
           healthCheckPassed = true;
-          console.log(`[yt-dlp health check] Ready: Standalone binary v${stdout.trim()} at ${command}`);
+          console.log(`[yt-dlp health check] Ready: ${command} -m yt_dlp v${stdout.trim()}`);
           resolve(true);
         } else {
-          console.error(`[yt-dlp health check] FATAL: Binary at ${command} exited with code ${code}`);
+          console.error(`[yt-dlp health check] FATAL: ${command} -m yt_dlp exited with code ${code}`);
           resolve(false);
         }
       });
@@ -197,7 +120,6 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
   }
 }
 
-// Execute health check on module import
 performBinaryHealthCheck().catch(() => {});
 
 export interface NormalizedFormat {
@@ -219,11 +141,6 @@ export interface YtDlpVideoInfo {
 }
 
 export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoInfo> {
-  const isHealthy = await performBinaryHealthCheck();
-  if (!isHealthy) {
-    throw new Error("Server yt-dlp binary health check failed. YTDLP_PATH binary is missing or non-executable.");
-  }
-
   const { command, argsPrefix } = getYtDlpCommand();
   const args = [...argsPrefix, "-j", "--no-playlist", url];
 
@@ -242,7 +159,7 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
     });
 
     child.on("error", (err) => {
-      reject(new Error(`Failed to spawn standalone yt-dlp binary: ${err.message}`));
+      reject(new Error(`Failed to spawn yt-dlp Python module: ${err.message}`));
     });
 
     child.on("close", (code) => {

@@ -63,44 +63,19 @@ export function validateFormatId(formatId: string): boolean {
 
 export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
   const isWin = process.platform === "win32";
-
-  const rawEnvPath = process.env.YTDLP_PATH;
-  let binPath: string;
-
-  if (rawEnvPath && rawEnvPath.trim().length > 0) {
-    const cleanedPath = rawEnvPath.trim().replace(/^["']|["']$/g, "");
-    if (cleanedPath === "yt-dlp" || cleanedPath === "/usr/local/bin/yt-dlp") {
-      binPath = cleanedPath;
-    } else {
-      binPath = path.resolve(cleanedPath);
-    }
-  } else if (!isWin) {
-    if (fs.existsSync("/usr/local/bin/yt-dlp")) {
-      binPath = "/usr/local/bin/yt-dlp";
-    } else if (fs.existsSync(path.resolve(process.cwd(), "bin", "yt-dlp"))) {
-      binPath = path.resolve(process.cwd(), "bin", "yt-dlp");
-    } else {
-      binPath = "/usr/local/bin/yt-dlp";
-    }
-  } else {
-    binPath = path.resolve(process.cwd(), "bin", "yt-dlp.exe");
-  }
-
-  return { command: binPath, argsPrefix: [] };
+  const pythonExec = isWin ? "python" : "python3";
+  return { command: pythonExec, argsPrefix: ["-m", "yt_dlp"] };
 }
 
 export function getFfmpegPath(): string {
-  const isWin = process.platform === "win32";
   const rawFfmpegPath = process.env.FFMPEG_PATH;
 
   if (rawFfmpegPath && rawFfmpegPath.trim().length > 0) {
     const cleanedPath = rawFfmpegPath.trim().replace(/^["']|["']$/g, "");
-    return cleanedPath;
-  }
-
-  const localFfmpeg = path.resolve(process.cwd(), "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
-  if (fs.existsSync(localFfmpeg)) {
-    return localFfmpeg;
+    if (cleanedPath === "ffmpeg") {
+      return "ffmpeg";
+    }
+    return path.resolve(cleanedPath);
   }
 
   return "ffmpeg";
@@ -112,10 +87,11 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
   if (healthCheckPassed) return true;
 
   try {
-    const { command } = getYtDlpCommand();
+    const { command, argsPrefix } = getYtDlpCommand();
+    const args = [...argsPrefix, "--version"];
 
     return new Promise((resolve) => {
-      const child = spawn(command, ["--version"], { shell: false });
+      const child = spawn(command, args, { shell: false });
 
       let stdout = "";
       child.stdout?.on("data", (data) => {
@@ -123,17 +99,17 @@ export async function performBinaryHealthCheck(): Promise<boolean> {
       });
 
       child.on("error", (err) => {
-        console.error(`[yt-dlp health check] FATAL: Failed to execute binary at ${command}: ${err.message}`);
+        console.error(`[yt-dlp health check] FATAL: Failed to execute ${command} -m yt_dlp: ${err.message}`);
         resolve(false);
       });
 
       child.on("close", (code) => {
         if (code === 0) {
           healthCheckPassed = true;
-          console.log(`[yt-dlp health check] Ready: Standalone binary v${stdout.trim()} at ${command}`);
+          console.log(`[yt-dlp health check] Ready: ${command} -m yt_dlp v${stdout.trim()}`);
           resolve(true);
         } else {
-          console.error(`[yt-dlp health check] FATAL: Binary at ${command} exited with code ${code}`);
+          console.error(`[yt-dlp health check] FATAL: ${command} -m yt_dlp exited with code ${code}`);
           resolve(false);
         }
       });
@@ -183,7 +159,7 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
     });
 
     child.on("error", (err) => {
-      reject(new Error(`Failed to spawn standalone yt-dlp binary: ${err.message}`));
+      reject(new Error(`Failed to spawn yt-dlp Python module: ${err.message}`));
     });
 
     child.on("close", (code) => {

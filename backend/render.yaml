@@ -7,7 +7,5 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
-      - key: YTDLP_PATH
-        value: /usr/local/bin/yt-dlp
       - key: FFMPEG_PATH
         value: ffmpeg

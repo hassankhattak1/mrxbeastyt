@@ -1,16 +1,15 @@
 FROM node:20-slim
 
-# Install ffmpeg, python3, curl, ca-certificates
+# Install python3, python3-pip, ffmpeg, ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
     python3 \
-    curl \
+    python3-pip \
+    ffmpeg \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Download standalone Linux yt-dlp binary to /usr/local/bin/yt-dlp
-RUN curl -L -o /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp
+# Install yt-dlp via pip3
+RUN pip3 install --break-system-packages yt-dlp
 
 WORKDIR /app
 
@@ -20,7 +19,6 @@ RUN npm install
 COPY . .
 
 ENV NODE_ENV=production
-ENV YTDLP_PATH=/usr/local/bin/yt-dlp
 ENV FFMPEG_PATH=ffmpeg
 
 RUN npm run build
