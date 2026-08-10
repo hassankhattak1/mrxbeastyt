@@ -108,6 +108,11 @@ export async function fetchVideoInfoWithYtDlp(url: string): Promise<YtDlpVideoIn
     return data.data;
   }
 
+  // If running in production / Vercel serverless environment without DOWNLOADER_API_URL configured
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    throw new Error("DOWNLOADER_API_URL environment variable is missing in Vercel settings. Please set DOWNLOADER_API_URL to your VPS downloader URL in Vercel Dashboard.");
+  }
+
   // Fallback for local development environment
   const { command, argsPrefix } = getYtDlpCommand();
   const args = [...argsPrefix, "-j", "--no-playlist", url];
