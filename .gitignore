@@ -20,6 +20,9 @@
 # production
 /build
 
+# binaries (auto-downloaded via postinstall script)
+/bin/
+
 # misc
 .DS_Store
 *.pem
