@@ -65,21 +65,29 @@ export function validateFormatId(formatId: string): boolean {
 export function getYtDlpCommand(): { command: string; argsPrefix: string[] } {
   const isWin = process.platform === "win32";
 
-  // Log raw environment variable with explicit delimiters
+  // Read environment variable or fallback to Linux / Windows defaults
   const rawEnvPath = process.env.YTDLP_PATH;
   console.log(`[RAW_YTDLP_PATH:${rawEnvPath}:END]`);
 
   let binPath: string;
 
   if (rawEnvPath && rawEnvPath.trim().length > 0) {
-    // Strip leading/trailing quotes or whitespace and normalize using Node's path.resolve
     const cleanedPath = rawEnvPath.trim().replace(/^["']|["']$/g, "");
     binPath = path.resolve(cleanedPath);
+  } else if (!isWin) {
+    // Linux container (Railway / Docker / VPS)
+    if (fs.existsSync("/usr/local/bin/yt-dlp")) {
+      binPath = "/usr/local/bin/yt-dlp";
+    } else if (fs.existsSync(path.resolve(process.cwd(), "bin", "yt-dlp"))) {
+      binPath = path.resolve(process.cwd(), "bin", "yt-dlp");
+    } else {
+      binPath = "/usr/local/bin/yt-dlp";
+    }
   } else {
-    binPath = path.resolve(process.cwd(), "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
+    // Windows local dev
+    binPath = path.resolve(process.cwd(), "bin", "yt-dlp.exe");
   }
 
-  // Print exact resolved path being checked by fs calls
   console.log(`[RESOLVED_YTDLP_PATH:${binPath}:END]`);
 
   // Verify file existence
