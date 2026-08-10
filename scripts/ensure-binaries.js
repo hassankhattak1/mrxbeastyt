@@ -1,21 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
-const { execSync } = require("child_process");
 
-const isWin = process.platform === "win32";
 const binDir = path.join(__dirname, "..", "bin");
 
 if (!fs.existsSync(binDir)) {
   fs.mkdirSync(binDir, { recursive: true });
 }
-
-const ytDlpFilename = isWin ? "yt-dlp.exe" : "yt-dlp";
-const ytDlpPath = path.join(binDir, ytDlpFilename);
-
-const ytDlpUrl = isWin
-  ? "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
-  : "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
 function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
@@ -33,11 +24,11 @@ function downloadFile(url, destPath) {
         response.pipe(file);
         file.on("finish", () => {
           file.close(() => {
-            if (!isWin) {
+            if (process.platform !== "win32") {
               try {
                 fs.chmodSync(destPath, 0o755);
               } catch (e) {
-                console.warn("[ensure-binaries] chmod failed:", e.message);
+                console.warn("[ensure-binaries] chmod warning:", e.message);
               }
             }
             console.log(`[ensure-binaries] Downloaded successfully: ${destPath}`);
@@ -55,36 +46,57 @@ function downloadFile(url, destPath) {
 }
 
 async function ensureBinaries() {
-  if (!fs.existsSync(ytDlpPath)) {
+  const linuxYtDlp = path.join(binDir, "yt-dlp");
+  const winYtDlp = path.join(binDir, "yt-dlp.exe");
+
+  // Ensure Linux binary
+  if (!fs.existsSync(linuxYtDlp)) {
     try {
-      await downloadFile(ytDlpUrl, ytDlpPath);
+      await downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp", linuxYtDlp);
     } catch (err) {
-      console.error("[ensure-binaries] Error downloading yt-dlp:", err.message);
+      console.error("[ensure-binaries] Error downloading Linux yt-dlp:", err.message);
     }
   } else {
-    console.log(`[ensure-binaries] yt-dlp binary already present at ${ytDlpPath}`);
-    if (!isWin) {
+    console.log(`[ensure-binaries] Linux yt-dlp binary present at ${linuxYtDlp}`);
+    if (process.platform !== "win32") {
       try {
-        fs.chmodSync(ytDlpPath, 0o755);
-      } catch (e) {
+        fs.chmodSync(linuxYtDlp, 0o755);
+      } catch {
         // Ignore chmod error
       }
     }
   }
 
+  // Ensure Windows binary
+  if (!fs.existsSync(winYtDlp)) {
+    try {
+      await downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", winYtDlp);
+    } catch (err) {
+      console.error("[ensure-binaries] Error downloading Windows yt-dlp:", err.message);
+    }
+  } else {
+    console.log(`[ensure-binaries] Windows yt-dlp binary present at ${winYtDlp}`);
+  }
+
   // Check ffmpeg binary
+  const isWin = process.platform === "win32";
   const ffmpegFilename = isWin ? "ffmpeg.exe" : "ffmpeg";
   const ffmpegPath = path.join(binDir, ffmpegFilename);
 
   if (!fs.existsSync(ffmpegPath)) {
     try {
-      // Try copying from @ffmpeg-installer if present
       const installerPath = path.join(
         __dirname,
         "..",
         "node_modules",
         "@ffmpeg-installer",
-        isWin ? "win32-x64" : process.platform === "darwin" ? (process.arch === "arm64" ? "darwin-arm64" : "darwin-x64") : "linux-x64",
+        isWin
+          ? "win32-x64"
+          : process.platform === "darwin"
+          ? process.arch === "arm64"
+            ? "darwin-arm64"
+            : "darwin-x64"
+          : "linux-x64",
         ffmpegFilename
       );
 
@@ -97,11 +109,11 @@ async function ensureBinaries() {
       console.warn("[ensure-binaries] Warning checking ffmpeg installer:", err.message);
     }
   } else {
-    console.log(`[ensure-binaries] ffmpeg binary already present at ${ffmpegPath}`);
+    console.log(`[ensure-binaries] ffmpeg binary present at ${ffmpegPath}`);
     if (!isWin) {
       try {
         fs.chmodSync(ffmpegPath, 0o755);
-      } catch (e) {
+      } catch {
         // Ignore chmod error
       }
     }
