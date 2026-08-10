@@ -14,15 +14,16 @@ RUN pip3 install --break-system-packages yt-dlp
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --include=dev
 
 COPY . .
 
-ENV NODE_ENV=production
+ENV YTDLP_PATH=yt-dlp
 ENV FFMPEG_PATH=ffmpeg
 
 RUN npm run build
 
+ENV NODE_ENV=production
 EXPOSE 5000
 
 CMD ["npm", "start"]
